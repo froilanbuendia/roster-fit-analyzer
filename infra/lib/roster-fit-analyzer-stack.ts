@@ -58,7 +58,10 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
     // --- HTTP API with REST-style resource routes ---
     const httpApi = new apigatewayv2.HttpApi(this, "RosterApi", {
       corsPreflight: {
-        allowOrigins: ["*"], // tighten to the actual frontend origin once deployed
+        allowOrigins: [
+          "https://d1iwvnizbo7jos.cloudfront.net",
+          "http://localhost:3000",
+        ],
         allowMethods: [apigatewayv2.CorsHttpMethod.GET],
         allowHeaders: ["content-type"],
       },
@@ -131,38 +134,48 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
     // --- GitHub Actions OIDC — keyless deploys from CI.
     // One OIDC provider per URL is allowed per account; import the existing one
     // rather than creating a second.
-    const githubProvider = iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
-      this,
-      "GitHubOidcProvider",
-      `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`,
-    );
+    const githubProvider =
+      iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+        this,
+        "GitHubOidcProvider",
+        `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`,
+      );
 
     const deployRole = new iam.Role(this, "GitHubActionsDeployRole", {
-      assumedBy: new iam.WebIdentityPrincipal(githubProvider.openIdConnectProviderArn, {
-        StringEquals: {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+      assumedBy: new iam.WebIdentityPrincipal(
+        githubProvider.openIdConnectProviderArn,
+        {
+          StringEquals: {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          },
+          StringLike: {
+            "token.actions.githubusercontent.com:sub":
+              "repo:froilanbuendia/roster-fit-analyzer:ref:refs/heads/main",
+          },
         },
-        StringLike: {
-          "token.actions.githubusercontent.com:sub":
-            "repo:froilanbuendia/roster-fit-analyzer:ref:refs/heads/main",
-        },
-      }),
+      ),
     });
 
-    deployRole.addToPolicy(new iam.PolicyStatement({
-      actions: ["s3:PutObject", "s3:DeleteObject", "s3:GetObject"],
-      resources: [`${siteBucket.bucketArn}/*`],
-    }));
-    deployRole.addToPolicy(new iam.PolicyStatement({
-      actions: ["s3:ListBucket"],
-      resources: [siteBucket.bucketArn],
-    }));
-    deployRole.addToPolicy(new iam.PolicyStatement({
-      actions: ["cloudfront:CreateInvalidation"],
-      resources: [
-        `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
-      ],
-    }));
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:PutObject", "s3:DeleteObject", "s3:GetObject"],
+        resources: [`${siteBucket.bucketArn}/*`],
+      }),
+    );
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:ListBucket"],
+        resources: [siteBucket.bucketArn],
+      }),
+    );
+    deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudfront:CreateInvalidation"],
+        resources: [
+          `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
+        ],
+      }),
+    );
 
     new cdk.CfnOutput(this, "DeployRoleArn", {
       value: deployRole.roleArn,
