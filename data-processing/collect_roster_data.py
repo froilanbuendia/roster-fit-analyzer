@@ -22,6 +22,13 @@ from nba_api.stats.endpoints import (
 import pandas as pd
 import time
 import json
+import os
+
+# Always resolve relative to this script's own location, not whatever
+# directory the shell happens to be in when it's run — avoids ending
+# up with duplicate roster_data.json files scattered across the repo.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_PATH = os.path.join(SCRIPT_DIR, "roster_data.json")
 
 LAKERS_TEAM_ID = 1610612747
 
@@ -44,6 +51,7 @@ DEPARTED = [
     "Marcus Smart",
     "Luke Kennard",
     "Jaxson Hayes",
+    "Rui Hachimura",
 ]
 
 ALL_PLAYERS = NEW_ADDITIONS + RETURNING_CORE + DEPARTED
@@ -361,11 +369,9 @@ def collect_prior_lakers_positional_baseline(lakers_stats_df: pd.DataFrame) -> d
 
 
 if __name__ == "__main__":
-    import os
-
     existing_data = {}
-    if os.path.exists("roster_data.json"):
-        with open("roster_data.json") as f:
+    if os.path.exists(OUTPUT_PATH):
+        with open(OUTPUT_PATH) as f:
             prior = json.load(f)
             existing_data = prior.get("players", {})
             if existing_data:
@@ -395,7 +401,7 @@ if __name__ == "__main__":
         },
     }
 
-    with open("roster_data.json", "w") as f:
+    with open(OUTPUT_PATH, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"\nDone. Collected {len(named_players)} players + positional baseline + roster composition -> roster_data.json")
+    print(f"\nDone. Collected {len(named_players)} players + positional baseline + roster composition -> {OUTPUT_PATH}")
