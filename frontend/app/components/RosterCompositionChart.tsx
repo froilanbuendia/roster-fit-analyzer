@@ -26,11 +26,11 @@ export function RosterCompositionChart({ rosterBefore, rosterAfter }: Props) {
   return (
     <div className="mb-8">
       <div className="flex items-baseline gap-3 mb-3">
-        <h2 className="text-xs font-medium text-neutral-400 uppercase tracking-wide">
+        <h2 className="text-xs font-medium text-lakers-gold uppercase tracking-wide">
           Roster composition
         </h2>
         {ageDelta != null && (
-          <span className={`text-xs ${ageDelta < 0 ? "text-green-600" : "text-neutral-400"}`}>
+          <span className={`text-xs ${ageDelta < 0 ? "text-lakers-gold" : "text-neutral-400"}`}>
             avg age {ageDelta > 0 ? "+" : ""}
             {ageDelta.toFixed(1)} yrs
           </span>
@@ -65,7 +65,7 @@ function RosterColumn({ roster, label }: { roster: RosterComposition; label: str
             <span className="text-xs text-neutral-400 w-4 shrink-0">{pos}</span>
             <div className="flex-1 bg-neutral-200 dark:bg-neutral-800 rounded-full h-1.5">
               <div
-                className="bg-neutral-500 dark:bg-neutral-400 h-1.5 rounded-full transition-all"
+                className={`h-1.5 rounded-full transition-all ${label === "After" ? "bg-lakers-gold" : "bg-lakers-purple"}`}
                 style={{ width: `${(counts[pos] / maxCount) * 100}%` }}
               />
             </div>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Player, PositionBaseline, StatRow } from "../lib/api";
 
 const POSITION_ABBREV: Record<string, string> = {
@@ -82,7 +83,7 @@ export function PlayerComparisonCards({ players, baseline }: Props) {
 
   return (
     <div className="mb-8">
-      <h2 className="text-xs font-medium text-neutral-400 mb-3 uppercase tracking-wide">
+      <h2 className="text-xs font-medium text-lakers-gold mb-3 uppercase tracking-wide">
         New additions vs. Lakers positional avg
       </h2>
       <div className="space-y-3">
@@ -112,10 +113,23 @@ function PlayerCard({
 }) {
   const bio = player.bio;
   const teamsLabel = agg.teams.length > 1 ? agg.teams.join(" → ") : agg.teams[0];
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-neutral-100 dark:bg-neutral-900 rounded-lg p-4">
-      <div className="flex items-baseline justify-between mb-3">
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      onClick={() => setExpanded((e) => !e)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setExpanded((v) => !v);
+        }
+      }}
+      className="bg-neutral-100 dark:bg-neutral-900 rounded-lg p-4 cursor-pointer transition-all duration-150 ease-out hover:scale-[1.01] hover:shadow-md active:scale-[0.99]"
+    >
+      <div className="flex items-baseline justify-between">
         <div>
           <span className="font-medium">{player.name}</span>
           {bio && (
@@ -129,34 +143,44 @@ function PlayerCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-[4rem_1fr_1fr] text-xs text-neutral-400 mb-1">
-        <span />
-        <span className="text-center">Prior team</span>
-        <span className="text-center">LAL {normPos ?? ""} avg</span>
-      </div>
+      <div
+        className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="mt-3">
+            <div className="grid grid-cols-[4rem_1fr_1fr] text-xs text-neutral-400 mb-1">
+              <span />
+              <span className="text-center">Prior team</span>
+              <span className="text-center">LAL {normPos ?? ""} avg</span>
+            </div>
 
-      {STAT_DEFS.map(({ label, playerKey, baselineKey, fmt }) => {
-        const pVal = agg[playerKey] as number | null;
-        const bVal = baseline ? (baseline[baselineKey] as number) : null;
-        const valueColor =
-          pVal != null && bVal != null
-            ? pVal >= bVal
-              ? "text-green-600"
-              : "text-red-500"
-            : "";
+            {STAT_DEFS.map(({ label, playerKey, baselineKey, fmt }) => {
+              const pVal = agg[playerKey] as number | null;
+              const bVal = baseline ? (baseline[baselineKey] as number) : null;
+              const valueColor =
+                pVal != null && bVal != null
+                  ? pVal >= bVal
+                    ? "text-green-600"
+                    : "text-red-500"
+                  : "";
 
-        return (
-          <div key={label} className="grid grid-cols-[4rem_1fr_1fr] text-sm py-0.5">
-            <span className="text-xs text-neutral-400">{label}</span>
-            <span className={`text-center font-medium ${valueColor}`}>
-              {pVal != null ? fmt(pVal) : "—"}
-            </span>
-            <span className="text-center text-neutral-500">
-              {bVal != null ? fmt(bVal) : "—"}
-            </span>
+              return (
+                <div key={label} className="grid grid-cols-[4rem_1fr_1fr] text-sm py-0.5">
+                  <span className="text-xs text-neutral-400">{label}</span>
+                  <span className={`text-center font-medium ${valueColor}`}>
+                    {pVal != null ? fmt(pVal) : "—"}
+                  </span>
+                  <span className="text-center text-neutral-500">
+                    {bVal != null ? fmt(bVal) : "—"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      </div>
     </div>
   );
 }

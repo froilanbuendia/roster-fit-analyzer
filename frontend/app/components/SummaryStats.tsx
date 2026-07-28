@@ -82,7 +82,7 @@ function StatCard({
   return (
     <div className="bg-neutral-100 dark:bg-neutral-900 rounded-lg p-3">
       <p className="text-xs text-neutral-500 mb-1">{label}</p>
-      <p className="text-xl font-medium">
+      <p className="text-xl font-medium text-lakers-gold">
         {value}
         {suffix && (
           <span className={`text-xs font-normal ml-1 ${suffixColor}`}>

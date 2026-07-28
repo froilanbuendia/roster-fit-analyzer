@@ -14,7 +14,7 @@ export default function Home() {
 
   return (
     <main className="max-w-3xl mx-auto p-6">
-      <div className="mb-5">
+      <div className="mb-5 pl-3 border-l-2 border-lakers-gold">
         <h1 className="text-lg font-medium">Lakers roster fit analyzer</h1>
         <p className="text-sm text-neutral-500">
           How the new roster compares to last season

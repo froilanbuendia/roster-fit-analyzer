@@ -12,6 +12,11 @@
   --font-mono: var(--font-geist-mono);
 }
 
+@theme {
+  --color-lakers-gold: #fdb927;
+  --color-lakers-purple: #552583;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;

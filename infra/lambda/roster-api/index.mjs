@@ -5,10 +5,12 @@ import {
   QueryCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { Logger } from "@aws-lambda-powertools/logger";
 
 const client = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(client);
 const TABLE_NAME = process.env.TABLE_NAME;
+const logger = new Logger({ serviceName: "roster-api" });
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -62,8 +64,14 @@ async function getRosterComposition(season) {
   return result.Item ?? null;
 }
 
-export const handler = async (event) => {
+export const handler = async (event, context) => {
+  logger.addContext(context);
   const routeKey = event.routeKey;
+
+  logger.info("Handling request", {
+    routeKey,
+    pathParameters: event.pathParameters,
+  });
 
   try {
     switch (routeKey) {
@@ -94,7 +102,7 @@ export const handler = async (event) => {
         return jsonResponse(404, { message: "Route not found" });
     }
   } catch (err) {
-    console.error(err);
+    logger.error("Request failed", { routeKey, error: err });
     return jsonResponse(500, { message: "Internal server error" });
   }
 };

@@ -38,6 +38,9 @@ NEW_ADDITIONS = [
     "Quentin Grimes",
     "Collin Sexton",
     "Jaden Hardy",
+    "Kevon Looney",
+    "Ziaire Williams",
+    "Matisse Thybulle"
 ]
 
 RETURNING_CORE = [
