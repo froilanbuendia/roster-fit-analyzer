@@ -7,8 +7,13 @@ search by the prefix.
 
 **Dashboard:** [`RosterFitAnalyzer`](https://us-west-2.console.aws.amazon.com/cloudwatch/home?region=us-west-2#dashboards:name=RosterFitAnalyzer)
 — alarm status, Lambda errors/duration, API Gateway 4xx/5xx/latency, DynamoDB
-throttling, and a live "recent errors" log query, all on one screen. Start
-every incident here before going to individual metrics.
+throttling, canary success %/duration, and a live "recent errors" log query,
+all on one screen. Start every incident here before going to individual
+metrics.
+
+**SLOs/SLIs:** see [`SLO.md`](SLO.md) for the targets these alarms are meant
+to protect and how each alarm's threshold relates to (and differs from) the
+rolling SLO.
 
 ---
 
@@ -42,6 +47,14 @@ fields error.name
   / `ThrottlingException`. Cross-check the dashboard's DynamoDB widget or
   scenario 2 below — if that's also elevated, the root cause is there, not
   the Lambda.
+- **Misconfigured `TABLE_NAME` or IAM policy drift** — `error.name` is
+  `AccessDeniedException` (or `ResourceNotFoundException`), `error.message`
+  names a table ARN that doesn't match `RosterFitAnalyzer`. Confirmed live
+  during the 2026-07-29 game day (§4): the Lambda's IAM policy is scoped to
+  the specific table ARN, so pointing `TABLE_NAME` at anything else denies
+  every DynamoDB call outright rather than a generic failure. Check
+  `TABLE_NAME` on `RosterApiFunction` against the `TableName` stack output
+  first — this is a config check, not a data or capacity problem.
 - **Malformed `pathParameters`** — e.g. `/players/{id}` hit with an `id` that
   breaks a downstream call. The `logger.info("Handling request", ...)` line
   immediately before the error entry has the exact `pathParameters` that
@@ -152,3 +165,102 @@ or a malformed response the Lambda returned that API Gateway couldn't proxy.
 **Escalation:** Same as above — no on-call. If the cause is "malformed
 response with no error log," that gap is itself worth a follow-up: it means
 this failure mode is currently invisible to both alarms and logs.
+
+---
+
+## 4. Synthetic check failing
+
+**Symptom:** `CanaryFailedAlarm` fires — the `roster-fit-availability` canary's
+`SuccessPercent` drops below 100 over 5 minutes. Note `treatMissingData` is
+`BREACHING` here (unlike the other alarms), so this also fires if the canary
+stops running altogether.
+
+**What this means:** the canary (`infra/canary/canary.js`) hits `/health` and
+the CloudFront frontend URL every 5 minutes from outside the app — this alarm
+can fire even with `RosterApiErrorsAlarm` and `RosterApi5xxAlarm` both `OK`,
+which points at something the app-side alarms can't see (CloudFront/S3, DNS,
+or the synthetics execution itself).
+
+**Diagnostic:** Dashboard → "Canary" alarm widget and "Canary success % /
+duration" graph, then open the canary run in the Synthetics console (Canary
+run history → failed run → screenshots/logs) to see which of the two steps
+(`apiHealth` or `frontend`) failed and why.
+
+- `apiHealth` step failed → treat as scenario 1 or 3 above; check `/health`
+  directly (`curl -i <api-url>/health`) — a 503 body means DynamoDB is
+  unreachable, matching `isDynamoDbReachable()` in
+  `infra/lambda/roster-api/index.mjs`.
+- `frontend` step failed → check the CloudFront distribution/S3 bucket
+  directly; not covered by any of the app alarms above.
+- Both steps failed → likely the canary's own execution (Lambda throttling,
+  bad deploy of `infra/canary/canary.js`) rather than the app — check the
+  canary's Lambda logs, not the app's.
+
+**Remediation:** Same as the underlying scenario once identified (1/3 for
+`apiHealth`, direct CloudFront/S3 investigation for `frontend`). If both
+steps failed with no app-side alarm also firing, redeploy the canary
+(`cdk deploy`) before assuming the app itself is down.
+
+**Escalation:** Same as above — no on-call.
+
+---
+
+## Game day log
+
+### 2026-07-29 — bad `TABLE_NAME` injection
+
+**Setup:** live `RosterApiFunction` env var `TABLE_NAME` changed from
+`RosterFitAnalyzer` to a nonexistent table name via
+`aws lambda update-function-configuration` (outside CDK, reverted
+immediately after). Traffic generated with `curl` against `/health`,
+`/players`, `/baseline/2025-26`, `/roster/2025-26`. Total live-broken
+window: ~11 minutes (21:23–21:34 UTC).
+
+**What fired:**
+- `RosterApi5xxAlarm` → `ALARM` within one 5-minute evaluation period,
+  SNS email delivered. Matches scenario 3 exactly, including the specific
+  signature it predicts: `RosterApiErrorsAlarm` stayed `OK` throughout.
+
+**What didn't fire, and why that's correct:**
+- `RosterApiErrorsAlarm` — never fired. The handler's `try/catch` (in
+  `infra/lambda/roster-api/index.mjs`) always returns a `jsonResponse(...)`,
+  so the Lambda function itself never throws; `AWS/Lambda` `Errors` only
+  counts unhandled exceptions. This means **no error-class failure in this
+  handler will ever trip `RosterApiErrorsAlarm`** — it's a Lambda-runtime
+  metric guarding against a failure mode this code doesn't have.
+  `RosterApi5xxAlarm` is the alarm actually doing the work here.
+- `TableThrottleAlarm` — correctly silent (this was an access-denied error,
+  not throttling).
+- `RosterApiDurationAlarm` — correctly silent (`AccessDeniedException`
+  fails fast, no timeout pressure).
+
+**What fired but shouldn't have stayed silent — bug found and fixed:**
+- `CanaryFailedAlarm` did **not** fire on this first pass. Canary logs
+  showed the `apiHealth` step genuinely detect and log the failure
+  (`FAILED failureReason: 503 Service Unavailable`), but the overall run
+  still reported `scriptStatus: PASSED` and `CloudWatchSynthetics`
+  `SuccessPercent` stayed at 100 the entire time (confirmed directly via
+  `get-metric-statistics`). Root cause: `executeHttpStep`'s
+  `continueOnHttpStepFailure` defaults to `true` — a failed step logs an
+  error but doesn't fail the run. `infra/canary/canary.js` never set it
+  explicitly. **Fixed:** set to `false` and redeployed.
+
+**Re-validated same day:** re-ran the identical `TABLE_NAME` injection
+against the fixed canary. Canary run at 14:40:16 PT came back
+`State: FAILED` (`Error: Step 1: apiHealth failed with: Error: 503 Service
+Unavailable`), `SuccessPercent` dropped to `0.0` for that 5-minute window,
+and `CanaryFailedAlarm` transitioned to `ALARM`
+(`Threshold Crossed: 1 datapoint [0.0] was less than the threshold (100.0)`)
+— alongside `RosterApi5xxAlarm` again. The fix works; the availability SLI
+is now trustworthy.
+
+**Real error signature observed:** `AccessDeniedException` — "not
+authorized to perform: dynamodb:DescribeTable/Query/GetItem on resource
+...RosterFitAnalyzer-DOES-NOT-EXIST" — because the Lambda's IAM policy is
+scoped to the real table's ARN. Added as a root cause to scenario 1 above;
+it wasn't previously documented (the doc only anticipated throttling,
+malformed input, or data-shape errors).
+
+**Follow-up:** none — re-validation above closes this out. The availability
+SLO in [`SLO.md`](SLO.md) can now be trusted to actually reflect real
+outages.

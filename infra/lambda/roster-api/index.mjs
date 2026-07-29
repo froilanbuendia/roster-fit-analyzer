@@ -1,4 +1,4 @@
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, DescribeTableCommand } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   ScanCommand,
@@ -54,6 +54,16 @@ async function getBaseline(season) {
   return result.Items;
 }
 
+async function isDynamoDbReachable() {
+  try {
+    await ddb.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+    return true;
+  } catch (err) {
+    logger.error("DynamoDB health check failed", { error: err });
+    return false;
+  }
+}
+
 async function getRosterComposition(season) {
   const result = await ddb.send(
     new GetCommand({
@@ -75,6 +85,14 @@ export const handler = async (event, context) => {
 
   try {
     switch (routeKey) {
+      case "GET /health": {
+        const healthy = await isDynamoDbReachable();
+        return jsonResponse(healthy ? 200 : 503, {
+          status: healthy ? "ok" : "unhealthy",
+          dynamodb: healthy ? "reachable" : "unreachable",
+        });
+      }
+
       case "GET /players": {
         const players = await getAllPlayers();
         return jsonResponse(200, players);

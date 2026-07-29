@@ -14,6 +14,7 @@ import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as synthetics from "aws-cdk-lib/aws-synthetics";
 import * as path from "path";
 
 export class RosterFitAnalyzerStack extends cdk.Stack {
@@ -77,6 +78,7 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
     });
 
     this.table.grantReadData(rosterApiFn);
+    this.table.grant(rosterApiFn, "dynamodb:DescribeTable");
 
     // --- HTTP API with REST-style resource routes ---
     const httpApi = new apigatewayv2.HttpApi(this, "RosterApi", {
@@ -95,6 +97,11 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
       rosterApiFn,
     );
 
+    httpApi.addRoutes({
+      path: "/health",
+      methods: [apigatewayv2.HttpMethod.GET],
+      integration,
+    });
     httpApi.addRoutes({
       path: "/players",
       methods: [apigatewayv2.HttpMethod.GET],
@@ -326,6 +333,60 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
     new cdk.CfnOutput(this, "DistributionId", {
       value: distribution.distributionId,
     });
+
+    // --- Synthetics canary: end-to-end check of the public surface
+    // (API health + frontend), on its own schedule rather than relying
+    // on real user traffic to exercise these paths.
+    const canary = new synthetics.Canary(this, "AvailabilityCanary", {
+      canaryName: "roster-fit-availability",
+      runtime: synthetics.Runtime.SYNTHETICS_NODEJS_PUPPETEER_13_0,
+      test: synthetics.Test.custom({
+        code: synthetics.Code.fromAsset(path.join(__dirname, "../canary")),
+        handler: "canary.handler",
+      }),
+      schedule: synthetics.Schedule.rate(cdk.Duration.minutes(5)),
+      environmentVariables: {
+        HEALTH_URL: `${httpApi.apiEndpoint}/health`,
+        SITE_URL: `https://${distribution.distributionDomainName}`,
+      },
+    });
+
+    const canaryFailedAlarm = new cloudwatch.Alarm(this, "CanaryFailedAlarm", {
+      alarmDescription:
+        "Availability canary failed to reach /health or the frontend",
+      metric: canary.metricSuccessPercent({
+        period: cdk.Duration.minutes(5),
+        statistic: "avg",
+      }),
+      threshold: 100,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      // Unlike the app alarms above, missing data here means the canary
+      // itself isn't running on its 5-minute schedule — that's a failure,
+      // not a quiet period.
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+    });
+    canaryFailedAlarm.addAlarmAction(
+      new cloudwatchActions.SnsAction(alertTopic),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.AlarmStatusWidget({
+        title: "Canary",
+        alarms: [canaryFailedAlarm],
+        width: 24,
+        height: 4,
+      }),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: "Canary success % / duration",
+        left: [canary.metricSuccessPercent({ statistic: "avg" })],
+        right: [canary.metricDuration({ statistic: "avg" })],
+        width: 12,
+      }),
+    );
 
     // --- GitHub Actions OIDC — keyless deploys from CI.
     // One OIDC provider per URL is allowed per account; import the existing one
