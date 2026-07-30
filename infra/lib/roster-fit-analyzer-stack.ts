@@ -344,7 +344,9 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
         code: synthetics.Code.fromAsset(path.join(__dirname, "../canary")),
         handler: "canary.handler",
       }),
-      schedule: synthetics.Schedule.rate(cdk.Duration.minutes(5)),
+      // Every 8 hours (~90 runs/month) to stay under the Synthetics free tier.
+      // CDK's Schedule.rate() caps at 60 minutes, so use a cron expression instead.
+      schedule: synthetics.Schedule.cron({ minute: "0", hour: "0/8" }),
       environmentVariables: {
         HEALTH_URL: `${httpApi.apiEndpoint}/health`,
         SITE_URL: `https://${distribution.distributionDomainName}`,
@@ -355,14 +357,14 @@ export class RosterFitAnalyzerStack extends cdk.Stack {
       alarmDescription:
         "Availability canary failed to reach /health or the frontend",
       metric: canary.metricSuccessPercent({
-        period: cdk.Duration.minutes(5),
+        period: cdk.Duration.hours(8),
         statistic: "avg",
       }),
       threshold: 100,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
       // Unlike the app alarms above, missing data here means the canary
-      // itself isn't running on its 5-minute schedule — that's a failure,
+      // itself isn't running on its 8-hour schedule — that's a failure,
       // not a quiet period.
       treatMissingData: cloudwatch.TreatMissingData.BREACHING,
     });
